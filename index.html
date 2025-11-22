@@ -1,0 +1,1126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Batch Boss - Cocktail Batching Calculator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+            background-color: #f0f2f5;
+        }
+        .app-container {
+            background: linear-gradient(to bottom, #ffffff, #f0f2f5);
+            min-height: 100vh;
+        }
+        .card {
+            background-color: white;
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.07), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+            padding: 1.5rem;
+        }
+        .ingredient-row {
+            display: grid;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+            padding: 1rem;
+            border-radius: 0.75rem;
+            border: 1px solid #e5e7eb;
+            background-color: #f9fafb;
+        }
+
+        /* Mobile layout: 2 columns */
+        .ingredient-row {
+            grid-template-columns: 1fr 1fr;
+        }
+        .ingredient-row > .name-field { grid-column: 1 / -1; }
+        .ingredient-row > .remove-btn-wrapper { grid-column: 1 / -1; }
+
+        /* Tablet and larger layout: 7 columns */
+        @media (min-width: 768px) {
+            .ingredient-row {
+                grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr 0.5fr;
+                align-items: center;
+                padding: 0.5rem;
+                border: none;
+                background-color: transparent;
+            }
+             .ingredient-row:nth-child(even) {
+                background-color: #f9fafb;
+             }
+             .ingredient-row > .name-field { grid-column: auto; }
+             .ingredient-row > .remove-btn-wrapper { grid-column: auto; }
+        }
+
+        .pushable-btn {
+            border-radius: 0.75rem;
+            border: 1px solid rgba(0,0,0,0.1);
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: all 0.15s ease-out;
+            transform: translateZ(0);
+        }
+        .pushable-btn:active {
+            transform: translateY(2px) scale(0.98);
+            box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+        }
+
+        input, select {
+             font-size: 16px !important;
+        }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+        }
+        .modal-content {
+            background: white;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+            width: 90%;
+            max-width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .result-table tbody tr:nth-child(even) {
+            background-color: #f9fafb;
+        }
+
+        /* Toast Notification */
+        #toast-container {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: 90%;
+            max-width: 400px;
+        }
+        .toast {
+            padding: 1rem;
+            border-radius: 0.75rem;
+            background: #333;
+            color: white;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+            font-weight: 500;
+            text-align: center;
+            animation: slideUp 0.3s ease-out forwards;
+        }
+        .toast.error { background-color: #ef4444; }
+        .toast.success { background-color: #10b981; }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Print Styles */
+        @media print {
+            body { background-color: white; }
+            .app-container { background: white; }
+            header h1 { color: black; font-size: 24pt; }
+            header p { display: none; }
+            #main-content > .card:not(#results-wrapper .card) { display: none; } /* Hide inputs */
+            #results-wrapper { display: block !important; }
+            #results-section, #stats-section, #preparation-section {
+                display: block !important;
+                box-shadow: none;
+                border: 1px solid #ccc;
+                margin-bottom: 20px;
+                break-inside: avoid;
+            }
+            button, select, .pushable-btn { display: none !important; }
+            /* Show volume unit in header since selector is hidden */
+            #volume-header::after { content: " (Final)"; }
+        }
+    </style>
+</head>
+<body class="app-container">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-5xl">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl md:text-5xl font-bold text-gray-900 tracking-tight">Batch Boss</h1>
+            <p class="text-gray-600 mt-2">Your Cocktail Batching Lab Assistant</p>
+        </header>
+
+        <main id="main-content" class="space-y-6">
+            <!-- Ingredients Section -->
+            <div class="card">
+                <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-4">
+                     <h2 class="text-2xl font-semibold"><span id="recipe-name-display" class="text-indigo-600 font-bold"></span> Ingredients</h2>
+                     <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                        <select id="cocktail-selector" class="w-full bg-white text-gray-700 font-bold py-3 px-4 pushable-btn appearance-none text-center">
+                            <option value="">Select a Classic Cocktail...</option>
+                            <option value="old_fashioned">Old Fashioned</option>
+                            <option value="negroni">Negroni</option>
+                            <option value="margarita">Margarita</option>
+                            <option value="daiquiri">Daiquiri</option>
+                            <option value="manhattan">Manhattan</option>
+                            <option value="dry_martini">Dry Martini</option>
+                            <option value="whiskey_sour">Whiskey Sour</option>
+                            <option value="paper_plane">Paper Plane</option>
+                        </select>
+                        <button type="button" id="suggest-recipe-btn" class="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 px-4 pushable-btn">
+                            Search for a Cocktail
+                        </button>
+                     </div>
+                </div>
+                <div id="ingredients-list">
+                    <!-- Ingredient rows will be dynamically added here -->
+                </div>
+                <div class="mt-4">
+                    <button type="button" id="add-ingredient" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 pushable-btn">
+                        Add Ingredient
+                    </button>
+                </div>
+            </div>
+
+            <!-- Batching Calculation Section -->
+            <div class="card">
+                <h2 class="text-2xl font-semibold mb-4">Batching Calculation</h2>
+
+                <fieldset class="mb-4">
+                    <legend class="sr-only">Batching Mode</legend>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <input type="radio" id="batch-by-drinks" name="batch-mode" value="drinks" class="sr-only peer" checked>
+                            <label for="batch-by-drinks" class="flex items-center justify-center w-full p-4 text-gray-700 bg-white border-2 border-gray-200 rounded-lg cursor-pointer peer-checked:border-indigo-600 peer-checked:text-indigo-600 hover:text-gray-600 hover:bg-gray-100">
+                                <span class="text-lg font-semibold">By Drinks</span>
+                            </label>
+                        </div>
+                        <div>
+                             <input type="radio" id="batch-by-volume" name="batch-mode" value="volume" class="sr-only peer">
+                             <label for="batch-by-volume" class="flex items-center justify-center w-full p-4 text-gray-700 bg-white border-2 border-gray-200 rounded-lg cursor-pointer peer-checked:border-indigo-600 peer-checked:text-indigo-600 hover:text-gray-600 hover:bg-gray-100">
+                                <span class="text-lg font-semibold">By Volume</span>
+                            </label>
+                        </div>
+                    </div>
+                </fieldset>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="drink-quantity" class="block text-sm font-medium text-gray-700">Number of Drinks</label>
+                        <input type="number" id="drink-quantity" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2" placeholder="e.g., 10">
+                    </div>
+                    <div>
+                        <label for="total-volume" class="block text-sm font-medium text-gray-700">Total Final Volume</label>
+                        <div class="flex gap-2 mt-1">
+                           <input type="number" id="total-volume" disabled class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2" placeholder="Calculated">
+                           <select id="total-volume-unit" class="p-2 border rounded-lg bg-white">
+                                <option value="oz">oz</option>
+                                <option value="ml">ml</option>
+                                <option value="cups">Cups</option>
+                           </select>
+                        </div>
+                    </div>
+                    <div class="md:col-span-2">
+                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label for="preparation-method" class="block text-sm font-medium text-gray-700 mb-1">Preparation</label>
+                                <select id="preparation-method" class="w-full bg-white text-gray-700 font-bold py-3 px-4 pushable-btn appearance-none text-center">
+                                    <option value="stirred">Stirred</option>
+                                    <option value="shaken">Shaken</option>
+                                    <option value="carbonated">Carbonated</option>
+                                    <option value="whip_shake">Whip Shake</option>
+                                    <option value="egg_white">Egg-white Shake</option>
+                                    <option value="flash_blend">Flash Blend</option>
+                                    <option value="none">No Dilution</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Service</label>
+                                <label for="on-the-rocks-checkbox" class="flex items-center justify-center w-full py-3 px-4 text-gray-700 bg-white cursor-pointer has-[:checked]:border-indigo-600 has-[:checked]:text-indigo-600 hover:text-gray-600 hover:bg-gray-100 pushable-btn">
+                                    <input id="on-the-rocks-checkbox" name="on-the-rocks" type="checkbox" class="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                                    <span class="ml-3 font-bold">On The Rocks?</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                 <div class="mt-6 flex flex-col sm:flex-row gap-4">
+                    <button type="button" id="calculate-batch" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 pushable-btn">
+                        Calculate Batch
+                    </button>
+                     <button type="button" id="reset-form" class="w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 pushable-btn">
+                        Reset
+                    </button>
+                </div>
+            </div>
+
+            <!-- Results & Stats Sections -->
+            <div id="results-wrapper" class="space-y-6">
+                <div id="results-section" class="card hidden">
+                     <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-4">
+                        <h2 class="text-2xl font-semibold">Batch Recipe</h2>
+                        <div class="flex items-center gap-4">
+                             <div class="flex items-center gap-2">
+                                <label for="output-unit" class="block text-sm font-medium text-gray-700">Unit:</label>
+                                <select id="output-unit" class="p-2 border rounded-lg bg-white">
+                                    <option value="oz">oz</option>
+                                    <option value="ml">ml</option>
+                                    <option value="cups">Cups</option>
+                                </select>
+                            </div>
+                            <button type="button" id="print-btn" class="bg-gray-700 hover:bg-gray-800 text-white font-bold py-2 px-4 pushable-btn text-sm">
+                                Print / PDF
+                            </button>
+                            <button type="button" id="export-csv" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 px-4 pushable-btn text-sm">
+                                Export CSV
+                            </button>
+                        </div>
+                    </div>
+                    <div id="results-summary" class="mb-4 text-lg bg-gray-50 p-3 rounded-lg"></div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full result-table">
+                            <thead>
+                                <tr>
+                                    <th class="text-left py-2 px-3 border-b">Ingredient</th>
+                                    <th id="volume-header" class="text-left py-2 px-3 border-b">Volume (oz)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="results-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="stats-section" class="card hidden">
+                    <h2 class="text-2xl font-semibold mb-4">Batch Statistics</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                         <div class="bg-gray-50 p-4 rounded-lg">
+                            <h3 class="font-semibold mb-2">Initial State</h3>
+                            <p><strong>Volume:</strong> <span id="stat-initial-volume" class="font-medium text-blue-600"></span></p>
+                            <p><strong>ABV:</strong> <span id="stat-initial-abv" class="font-medium text-blue-600"></span>%</p>
+                        </div>
+                        <div class="bg-gray-50 p-4 rounded-lg">
+                            <h3 class="font-semibold mb-2">Dilution</h3>
+                            <p><strong>Water to Add:</strong> <span id="stat-dilution" class="font-medium text-blue-600"></span></p>
+                        </div>
+                         <div class="bg-gray-50 p-4 rounded-lg md:col-span-2">
+                            <h3 class="font-semibold mb-2">Final State</h3>
+                            <div class="grid grid-cols-2 gap-4">
+                                 <p><strong>Volume:</strong> <span id="stat-final-volume" class="font-medium text-green-600"></span></p>
+                                 <p><strong>ABV:</strong> <span id="stat-final-abv" class="font-medium text-green-600"></span>%</p>
+                                 <p><strong>Brix:</strong> <span id="stat-final-brix" class="font-medium text-green-600"></span>°</p>
+                                 <p><strong>TA:</strong> <span id="stat-final-ta" class="font-medium text-green-600"></span> g/L</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="preparation-section" class="card hidden">
+                    <h2 class="text-2xl font-semibold mb-4">Preparation and Presentation</h2>
+                    <div class="space-y-3 bg-gray-50 p-4 rounded-lg">
+                        <p><strong>Single Drink Pour:</strong> <span id="prep-pour-volume" class="font-medium text-blue-600"></span></p>
+                        <p><strong>Recommended Glass:</strong> <span id="prep-glass" class="font-medium text-blue-600"></span></p>
+                        <p><strong>Garnish:</strong> <span id="prep-garnish" class="font-medium text-blue-600"></span></p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+
+    <!-- Gemini Modal -->
+    <div id="gemini-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h2 class="text-2xl font-bold mb-4">Search for a Cocktail</h2>
+
+            <!-- API Key Input -->
+            <div class="mb-4">
+                <label for="gemini-api-key" class="block text-sm font-medium text-gray-700">Gemini API Key</label>
+                <input type="password" id="gemini-api-key" class="w-full p-2 border rounded-lg mt-1 text-sm" placeholder="Enter your API Key here">
+                <p class="text-xs text-gray-500 mt-1">Required for search functionality.</p>
+            </div>
+
+            <p class="text-gray-600 mb-4">Name the cocktail you want to batch or describe the drink you're imagining. Mention key ingredients, flavors, or a theme.</p>
+            <textarea id="gemini-prompt" class="w-full p-2 border rounded-lg mb-4" rows="3" placeholder="e.g., A refreshing gin cocktail with cucumber and basil..."></textarea>
+            <div id="gemini-loader" class="text-center hidden mb-4">
+                <p>Crafting your recipe...</p>
+                <!-- Spinner -->
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500 mx-auto mt-2"></div>
+            </div>
+            <div class="flex flex-col sm:flex-row gap-4">
+                <button type="button" id="gemini-submit" class="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 px-4 pushable-btn">Generate</button>
+                <button type="button" id="gemini-cancel" class="w-full bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-3 px-4 pushable-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+
+            const cocktailRecipes = {
+                old_fashioned: {
+                    displayName: 'Old Fashioned', method: 'stirred', pourVolumeOz: 3.5, glass: 'Rocks Glass', garnish: 'Orange Peel',
+                    ingredients: [
+                        { name: 'Bourbon (90 proof)', qty: 2, unit: 'oz', abv: 45, brix: 0, ta: 0 },
+                        { name: '2:1 Demerara Syrup', qty: 0.25, unit: 'oz', abv: 0, brix: 66.7, ta: 0 },
+                        { name: 'Angostura Bitters', qty: 2, unit: 'dash', abv: 44.7, brix: 35, ta: 0 },
+                    ]
+                },
+                negroni: {
+                    displayName: 'Negroni', method: 'stirred', pourVolumeOz: 3.75, glass: 'Rocks Glass', garnish: 'Orange Peel',
+                    ingredients: [
+                        { name: 'Gin (94 proof)', qty: 1, unit: 'oz', abv: 47, brix: 0, ta: 0 },
+                        { name: 'Campari', qty: 1, unit: 'oz', abv: 24, brix: 26, ta: 0 },
+                        { name: 'Sweet Vermouth', qty: 1, unit: 'oz', abv: 16, brix: 16, ta: 5 },
+                    ]
+                },
+                margarita: {
+                    displayName: 'Margarita', method: 'shaken', pourVolumeOz: 4.5, glass: 'Coupe or Rocks Glass', garnish: 'Lime Wheel and Salt Rim (optional)',
+                    ingredients: [
+                        { name: 'Tequila Blanco (80 proof)', qty: 2, unit: 'oz', abv: 40, brix: 0, ta: 0 },
+                        { name: 'Lime Juice', qty: 1, unit: 'oz', abv: 0, brix: 4, ta: 60 },
+                        { name: 'Cointreau', qty: 0.75, unit: 'oz', abv: 40, brix: 25, ta: 0 },
+                        { name: 'Agave Nectar', qty: 0.25, unit: 'oz', abv: 0, brix: 75, ta: 0 },
+                    ]
+                },
+                daiquiri: {
+                    displayName: 'Daiquiri', method: 'shaken', pourVolumeOz: 4.5, glass: 'Coupe Glass', garnish: 'Lime Wheel',
+                    ingredients: [
+                        { name: 'White Rum (80 proof)', qty: 2, unit: 'oz', abv: 40, brix: 0, ta: 0 },
+                        { name: 'Lime Juice', qty: 1, unit: 'oz', abv: 0, brix: 4, ta: 60 },
+                        { name: 'Simple Syrup (1:1)', qty: 0.75, unit: 'oz', abv: 0, brix: 50, ta: 0 },
+                    ]
+                },
+                manhattan: {
+                    displayName: 'Manhattan', method: 'stirred', pourVolumeOz: 3.75, glass: 'Coupe or Nick & Nora Glass', garnish: 'Brandied Cherry',
+                    ingredients: [
+                        { name: 'Rye Whiskey (100 proof)', qty: 2, unit: 'oz', abv: 50, brix: 0, ta: 0 },
+                        { name: 'Sweet Vermouth', qty: 1, unit: 'oz', abv: 16, brix: 16, ta: 5 },
+                        { name: 'Angostura Bitters', qty: 2, unit: 'dash', abv: 44.7, brix: 35, ta: 0 },
+                    ]
+                },
+                dry_martini: {
+                    displayName: 'Dry Martini', method: 'stirred', pourVolumeOz: 4, glass: 'Martini or Nick & Nora Glass', garnish: 'Lemon Twist or Olive',
+                    ingredients: [
+                         { name: 'Gin (94 proof)', qty: 2.5, unit: 'oz', abv: 47, brix: 0, ta: 0 },
+                         { name: 'Dry Vermouth', qty: 0.5, unit: 'oz', abv: 18, brix: 4, ta: 6 },
+                    ]
+                },
+                whiskey_sour: {
+                    displayName: 'Whiskey Sour', method: 'shaken', pourVolumeOz: 4.5, glass: 'Rocks Glass', garnish: 'Lemon Peel and Brandied Cherry',
+                    ingredients: [
+                        { name: 'Bourbon (90 proof)', qty: 2, unit: 'oz', abv: 45, brix: 0, ta: 0 },
+                        { name: 'Lemon Juice', qty: 0.75, unit: 'oz', abv: 0, brix: 4, ta: 60 },
+                        { name: 'Simple Syrup (1:1)', qty: 0.75, unit: 'oz', abv: 0, brix: 50, ta: 0 },
+                    ]
+                },
+                paper_plane: {
+                    displayName: 'Paper Plane', method: 'shaken', pourVolumeOz: 4, glass: 'Coupe Glass', garnish: 'Miniature Paper Plane (optional)',
+                    ingredients: [
+                        { name: 'Bourbon (90 proof)', qty: 0.75, unit: 'oz', abv: 45, brix: 0, ta: 0 },
+                        { name: 'Aperol', qty: 0.75, unit: 'oz', abv: 11, brix: 22, ta: 0 },
+                        { name: 'Amaro Nonino', qty: 0.75, unit: 'oz', abv: 35, brix: 20, ta: 2 },
+                        { name: 'Lemon Juice', qty: 0.75, unit: 'oz', abv: 0, brix: 4, ta: 60 },
+                    ]
+                }
+            };
+
+            const dilutionRates = {
+                stirred: 0.18, shaken: 0.25, carbonated: 0.20, whip_shake: 0.22, egg_white: 0.30, flash_blend: 0.35, none: 0
+            };
+
+            // --- DOM Elements ---
+            const ingredientsList = document.getElementById('ingredients-list');
+            const addIngredientBtn = document.getElementById('add-ingredient');
+            const cocktailSelector = document.getElementById('cocktail-selector');
+            const calculateBtn = document.getElementById('calculate-batch');
+            const resetBtn = document.getElementById('reset-form');
+            const drinkQuantityInput = document.getElementById('drink-quantity');
+            const totalVolumeInput = document.getElementById('total-volume');
+            const totalVolumeUnitSelector = document.getElementById('total-volume-unit');
+            const preparationMethodSelector = document.getElementById('preparation-method');
+            const onTheRocksCheckbox = document.getElementById('on-the-rocks-checkbox');
+            const outputUnitSelector = document.getElementById('output-unit');
+            const exportCsvBtn = document.getElementById('export-csv');
+            const printBtn = document.getElementById('print-btn');
+            const batchModeRadios = document.querySelectorAll('input[name="batch-mode"]');
+            const recipeNameDisplay = document.getElementById('recipe-name-display');
+            const toastContainer = document.getElementById('toast-container');
+
+            const resultsSection = document.getElementById('results-section');
+            const statsSection = document.getElementById('stats-section');
+            const preparationSection = document.getElementById('preparation-section');
+            const resultsSummary = document.getElementById('results-summary');
+            const resultsTableBody = document.getElementById('results-table-body');
+            const volumeHeader = document.getElementById('volume-header');
+
+            const suggestRecipeBtn = document.getElementById('suggest-recipe-btn');
+            const geminiModal = document.getElementById('gemini-modal');
+            const geminiPrompt = document.getElementById('gemini-prompt');
+            const geminiApiKeyInput = document.getElementById('gemini-api-key');
+            const geminiSubmit = document.getElementById('gemini-submit');
+            const geminiCancel = document.getElementById('gemini-cancel');
+            const geminiLoader = document.getElementById('gemini-loader');
+
+            let lastCalculation = null;
+            let lastRecipeDetails = null;
+
+            // --- TOAST NOTIFICATION SYSTEM ---
+            const showNotification = (message, type = 'error') => {
+                const toast = document.createElement('div');
+                toast.className = `toast ${type}`;
+                toast.textContent = message;
+                toastContainer.appendChild(toast);
+                setTimeout(() => {
+                    toast.remove();
+                }, 3000);
+            };
+
+            // --- AUTO-SAVE / LOAD ---
+            const saveState = () => {
+                const ingredients = getIngredientsData();
+                const state = {
+                    ingredients,
+                    recipeName: recipeNameDisplay.textContent,
+                    drinkQty: drinkQuantityInput.value,
+                    totalVol: totalVolumeInput.value,
+                    prepMethod: preparationMethodSelector.value,
+                    onRocks: onTheRocksCheckbox.checked,
+                    apiKey: geminiApiKeyInput.value
+                };
+                localStorage.setItem('batchBossState', JSON.stringify(state));
+            };
+
+            const loadState = () => {
+                const saved = localStorage.getItem('batchBossState');
+                if (saved) {
+                    const state = JSON.parse(saved);
+                    if (state.apiKey) geminiApiKeyInput.value = state.apiKey;
+                    if (state.ingredients && state.ingredients.length > 0) {
+                        ingredientsList.innerHTML = '';
+                        state.ingredients.forEach(ing => addIngredientRow(ing));
+                        recipeNameDisplay.textContent = state.recipeName || '';
+                        drinkQuantityInput.value = state.drinkQty || '';
+                        totalVolumeInput.value = state.totalVol || '';
+                        preparationMethodSelector.value = state.prepMethod || 'shaken';
+                        onTheRocksCheckbox.checked = state.onRocks || false;
+                        syncLinkedInputs(); // Recalculate on load
+                    } else {
+                        addIngredientRow();
+                    }
+                } else {
+                    addIngredientRow();
+                }
+            };
+
+            // --- ADD INGREDIENT ROW (MOBILE FRIENDLY) ---
+            const addIngredientRow = (ingredient = {}) => {
+                const ingredientRow = document.createElement('div');
+                ingredientRow.className = 'ingredient-row';
+                ingredientRow.innerHTML = `
+                    <div class="name-field">
+                        <label class="block text-sm font-medium text-gray-700 md:hidden">Name</label>
+                        <input type="text" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" placeholder="Ingredient Name" value="${ingredient.name || ''}">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 md:hidden">Qty</label>
+                        <input type="number" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" placeholder="Qty" value="${ingredient.qty || ''}">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 md:hidden">Unit</label>
+                        <select class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 bg-white">
+                            <option value="oz" ${ingredient.unit === 'oz' ? 'selected' : ''}>oz</option>
+                            <option value="ml" ${ingredient.unit === 'ml' ? 'selected' : ''}>ml</option>
+                            <option value="dash" ${ingredient.unit === 'dash' ? 'selected' : ''}>dash</option>
+                            <option value="drop" ${ingredient.unit === 'drop' ? 'selected' : ''}>drop</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 md:hidden">ABV %</label>
+                        <input type="number" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" placeholder="ABV %" value="${ingredient.abv || ''}">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 md:hidden">Brix °</label>
+                        <input type="number" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" placeholder="Brix °" value="${ingredient.brix || ''}">
+                    </div>
+                     <div>
+                        <label class="block text-sm font-medium text-gray-700 md:hidden">TA g/L</label>
+                        <input type="number" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" placeholder="TA g/L" value="${ingredient.ta || ''}">
+                    </div>
+                    <div class="flex items-end justify-center remove-btn-wrapper">
+                        <button type="button" class="remove-ingredient text-red-500 hover:text-red-700 font-bold p-2 rounded-full w-full md:w-auto h-10 md:bg-transparent bg-red-100">
+                            <svg class="w-6 h-6 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                    </div>
+                `;
+                // Attach listener to specific remove button
+                ingredientRow.querySelector('.remove-ingredient').addEventListener('click', () => {
+                    ingredientRow.remove();
+                    syncLinkedInputs();
+                    saveState();
+                });
+                ingredientsList.appendChild(ingredientRow);
+            };
+
+            const populateIngredients = (cocktailKey) => {
+                ingredientsList.innerHTML = '';
+                onTheRocksCheckbox.checked = false; // Reset checkbox
+                if (!cocktailKey) {
+                    lastRecipeDetails = null;
+                    recipeNameDisplay.textContent = '';
+                    addIngredientRow();
+                    saveState();
+                    return;
+                }
+                const recipeData = cocktailRecipes[cocktailKey];
+                if(recipeData) {
+                    recipeNameDisplay.textContent = recipeData.displayName;
+                    recipeData.ingredients.forEach(ing => addIngredientRow(ing));
+                    preparationMethodSelector.value = recipeData.method;
+                    lastRecipeDetails = {
+                        name: recipeData.displayName,
+                        glass: recipeData.glass,
+                        garnish: recipeData.garnish,
+                        pourVolumeOz: recipeData.pourVolumeOz
+                    };
+                    // Auto-check "on the rocks" if the glass is a rocks glass
+                    if (recipeData.glass.toLowerCase().includes('rocks')) {
+                        onTheRocksCheckbox.checked = true;
+                    }
+                }
+                syncLinkedInputs();
+                saveState();
+            };
+
+            // --- UNIT CONVERSION & FORMATTING UTILITIES ---
+            const convertToMl = (qty, unit) => {
+                qty = parseFloat(qty);
+                if (isNaN(qty)) return 0;
+                switch (unit) {
+                    case 'oz': return qty * 29.5735;
+                    case 'ml': return qty;
+                    case 'dash': return qty * 0.788631; // About 1/32 oz
+                    case 'drop': return qty * 0.049289; // About 1/600 oz
+                    case 'cups': return qty * 236.588;
+                    default: return 0;
+                }
+            };
+
+            const convertFromMl = (qty, unit) => {
+                qty = parseFloat(qty);
+                if (isNaN(qty)) return 0;
+                switch (unit) {
+                    case 'oz': return qty / 29.5735;
+                    case 'ml': return qty;
+                    case 'cups': return qty / 236.588;
+                    default: return 0;
+                }
+            };
+
+            const gcd = (a, b) => b ? gcd(b, a % b) : a;
+
+            const decimalToFraction = (decimal) => {
+                if (decimal === 0) return '0';
+                const whole = Math.floor(decimal);
+                const frac = decimal - whole;
+                if (frac === 0) return whole.toString();
+
+                const tolerance = 1.0E-6;
+                let h1 = 1; let h2 = 0;
+                let k1 = 0; let k2 = 1;
+                let b = frac;
+                do {
+                    let a = Math.floor(b);
+                    let aux = h1; h1 = a * h1 + h2; h2 = aux;
+                    aux = k1; k1 = a * k1 + k2; k2 = aux;
+                    b = 1 / (b - a);
+                } while (Math.abs(frac - h1 / k1) > frac * tolerance);
+
+                // Round to nearest 1/8
+                const roundedDenominator = 8;
+                const roundedNumerator = Math.round((h1/k1) * roundedDenominator);
+
+                if (roundedNumerator === 0 && whole > 0) return whole.toString();
+                if (roundedNumerator === 0 && whole === 0) return '0';
+
+                const commonDivisor = gcd(roundedNumerator, roundedDenominator);
+                let num = roundedNumerator / commonDivisor;
+                let den = roundedDenominator / commonDivisor;
+
+                if (num === den) return (whole + 1).toString();
+                if (num === 0) return whole > 0 ? whole.toString() : '';
+
+                return (whole > 0 ? whole + ' ' : '') + num + '/' + den;
+            };
+
+            // --- PHYSICS / DENSITY CALCULATION ---
+            const calculateDensity = (brix, abv) => {
+                // Density is approx: 1 + (Sugar Effect) - (Alcohol Effect)
+                // Sucrose raises SG by roughly 0.004 per Brix
+                // Ethanol lowers SG by roughly 0.0021 per %ABV (roughly, 100% ethanol is 0.789)
+                // This is a linearized approximation sufficient for cocktail math.
+                // Base water = 1.0
+                const density = 1.0 + (brix * 0.004) - (abv * 0.0021);
+                return density > 0 ? density : 0.789; // Clamp minimum to ethanol density
+            };
+
+            // --- CALCULATION LOGIC ---
+            const getIngredientsData = () => {
+                return Array.from(ingredientsList.children).map(row => {
+                    const inputs = row.querySelectorAll('input, select');
+                    return {
+                        name: inputs[0].value,
+                        qty: parseFloat(inputs[1].value) || 0,
+                        unit: inputs[2].value,
+                        abv: parseFloat(inputs[3].value) || 0,
+                        brix: parseFloat(inputs[4].value) || 0,
+                        ta: parseFloat(inputs[5].value) || 0,
+                    };
+                }).filter(ing => ing.name && ing.qty > 0);
+            };
+
+            const performCalculation = (isSync = false) => {
+                const ingredients = getIngredientsData();
+                if (ingredients.length === 0) {
+                    if (!isSync) showNotification("Please add at least one ingredient.", "error");
+                    return null;
+                }
+
+                let totalVolumeMl = 0, totalAlcoholMl = 0, totalSugarGrams = 0, totalAcidGrams = 0, totalMassGrams = 0;
+
+                ingredients.forEach(ing => {
+                    const volumeMl = convertToMl(ing.qty, ing.unit);
+                    const density = calculateDensity(ing.brix, ing.abv);
+                    const massGrams = volumeMl * density;
+
+                    totalVolumeMl += volumeMl;
+                    totalMassGrams += massGrams;
+                    totalAlcoholMl += volumeMl * (ing.abv / 100);
+
+                    // Approx sugar mass: volume * density * (Brix/100)
+                    totalSugarGrams += massGrams * (ing.brix / 100);
+
+                    // Acid is usually g/L, so volume * (g/L / 1000)
+                    totalAcidGrams += volumeMl * (ing.ta / 1000);
+                });
+
+                if (totalVolumeMl === 0) return null;
+
+                const initialABV = (totalAlcoholMl / totalVolumeMl) * 100;
+
+                let dilutionRate = dilutionRates[preparationMethodSelector.value] || 0;
+                if(onTheRocksCheckbox.checked) {
+                    dilutionRate = Math.max(0, dilutionRate - 0.05);
+                }
+
+                const waterToAddMl = totalVolumeMl * dilutionRate;
+                const finalVolumeMl = totalVolumeMl + waterToAddMl;
+                const finalABV = (totalAlcoholMl / finalVolumeMl) * 100;
+
+                // New total mass after adding water (density 1.0)
+                const finalMassGrams = totalMassGrams + waterToAddMl;
+
+                // Final Brix = Total Sugar Mass / Final Total Mass
+                const finalCorrectedBrix = (totalSugarGrams / finalMassGrams) * 100;
+
+                const finalTA = (totalAcidGrams / (finalVolumeMl / 1000));
+
+                return {
+                    ingredients,
+                    stats: {
+                        initialVolumeMl: totalVolumeMl,
+                        initialABV: initialABV,
+                        waterToAddMl: waterToAddMl,
+                        finalVolumeMl: finalVolumeMl,
+                        finalABV: finalABV,
+                        finalBrix: finalCorrectedBrix,
+                        finalTA: finalTA
+                    }
+                };
+            };
+
+            // --- DYNAMIC INPUT SYNCING ---
+            const syncLinkedInputs = () => {
+                const calcData = performCalculation(true);
+                if (!calcData) {
+                    // Don't clear user inputs if they are typing a recipe, just don't calc
+                    // But if there are no ingredients, clear calculated fields.
+                    if(getIngredientsData().length === 0) {
+                         if (document.querySelector('input[name="batch-mode"]:checked').value === 'drinks') {
+                            totalVolumeInput.value = '';
+                         } else {
+                            drinkQuantityInput.value = '';
+                         }
+                    }
+                    return;
+                };
+
+                const singleDrinkVolumeMl = calcData.stats.finalVolumeMl;
+                const mode = document.querySelector('input[name="batch-mode"]:checked').value;
+
+                if (mode === 'drinks') {
+                    const numDrinks = parseFloat(drinkQuantityInput.value);
+                    if (!isNaN(numDrinks) && numDrinks > 0) {
+                        const totalVolumeMl = singleDrinkVolumeMl * numDrinks;
+                        const displayVolume = convertFromMl(totalVolumeMl, totalVolumeUnitSelector.value);
+                        totalVolumeInput.value = displayVolume > 0 ? displayVolume.toFixed(2) : '';
+                    } else {
+                        totalVolumeInput.value = '';
+                    }
+                } else { // mode === 'volume'
+                    const totalVolume = parseFloat(totalVolumeInput.value);
+                    if (!isNaN(totalVolume) && totalVolume > 0 && singleDrinkVolumeMl > 0) {
+                        const totalVolumeMl = convertToMl(totalVolume, totalVolumeUnitSelector.value);
+                        const numDrinks = totalVolumeMl / singleDrinkVolumeMl;
+                        drinkQuantityInput.value = numDrinks > 0 ? numDrinks.toFixed(2) : '';
+                    } else {
+                        drinkQuantityInput.value = '';
+                    }
+                }
+            };
+
+            // --- RENDERING FUNCTIONS ---
+            const renderAll = () => {
+                if (!lastCalculation) return;
+                renderResults();
+                renderStats();
+                renderPreparation();
+            }
+
+            const renderResults = () => {
+                if (!lastCalculation) return;
+
+                const { ingredients, multiplier, stats } = lastCalculation;
+                const outputUnit = outputUnitSelector.value;
+                const totalBatchVol = convertFromMl(stats.finalVolumeMl * multiplier, outputUnit)
+
+                volumeHeader.textContent = `Volume (${outputUnit})`;
+                resultsSummary.textContent = `Total Batch Volume: ${outputUnit === 'cups' ? decimalToFraction(totalBatchVol) : totalBatchVol.toFixed(2)} ${outputUnit}`;
+
+                resultsTableBody.innerHTML = '';
+
+                ingredients.forEach(ing => {
+                    const singleVolumeMl = convertToMl(ing.qty, ing.unit);
+                    const batchVolumeMl = singleVolumeMl * multiplier;
+                    const displayVolume = convertFromMl(batchVolumeMl, outputUnit);
+
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td class="py-2 px-3">${ing.name}</td>
+                        <td class="py-2 px-3">${outputUnit === 'cups' ? decimalToFraction(displayVolume) : displayVolume.toFixed(2)}</td>
+                    `;
+                    resultsTableBody.appendChild(row);
+                });
+
+                if (stats.waterToAddMl > 0) {
+                    const waterBatchVolumeMl = stats.waterToAddMl * multiplier;
+                    const displayVolume = convertFromMl(waterBatchVolumeMl, outputUnit);
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td class="py-2 px-3">Water (for dilution)</td>
+                        <td class="py-2 px-3">${outputUnit === 'cups' ? decimalToFraction(displayVolume) : displayVolume.toFixed(2)}</td>
+                    `;
+                    resultsTableBody.appendChild(row);
+                }
+
+                resultsSection.classList.remove('hidden');
+            };
+
+            const renderStats = () => {
+                if (!lastCalculation) return;
+                const { stats, multiplier } = lastCalculation;
+
+                document.getElementById('stat-initial-volume').textContent = `${(convertFromMl(stats.initialVolumeMl, 'oz') * multiplier).toFixed(2)} oz`;
+                document.getElementById('stat-initial-abv').textContent = stats.initialABV.toFixed(2);
+                document.getElementById('stat-dilution').textContent = `${(convertFromMl(stats.waterToAddMl, 'oz') * multiplier).toFixed(2)} oz`;
+                document.getElementById('stat-final-volume').textContent = `${(convertFromMl(stats.finalVolumeMl, 'oz') * multiplier).toFixed(2)} oz`;
+                document.getElementById('stat-final-abv').textContent = stats.finalABV.toFixed(2);
+                document.getElementById('stat-final-brix').textContent = isNaN(stats.finalBrix) ? 'N/A' : stats.finalBrix.toFixed(2);
+                document.getElementById('stat-final-ta').textContent = stats.finalTA.toFixed(2);
+                statsSection.classList.remove('hidden');
+            };
+
+            const renderPreparation = () => {
+                if (!lastRecipeDetails || !lastRecipeDetails.pourVolumeOz) {
+                    preparationSection.classList.add('hidden');
+                    return;
+                }
+                preparationSection.classList.remove('hidden');
+
+                const outputUnit = outputUnitSelector.value;
+                const pourVolumeMl = convertToMl(lastRecipeDetails.pourVolumeOz, 'oz');
+                const displayPourVolume = convertFromMl(pourVolumeMl, outputUnit);
+
+                document.getElementById('prep-pour-volume').textContent = `${outputUnit === 'cups' ? decimalToFraction(displayPourVolume) : displayPourVolume.toFixed(2)} ${outputUnit}`;
+                document.getElementById('prep-glass').textContent = lastRecipeDetails.glass;
+                document.getElementById('prep-garnish').textContent = lastRecipeDetails.garnish;
+            };
+
+            // --- SMART UNIT SELECTION ---
+            const determineOptimalOutputUnit = (calculationData) => {
+                const { ingredients, stats, multiplier } = calculationData;
+                const allVolumesMl = [
+                    ...ingredients.map(ing => convertToMl(ing.qty, ing.unit) * multiplier),
+                    stats.waterToAddMl * multiplier
+                ];
+
+                const isDivisibleByQuarterCup = allVolumesMl.every(vol => {
+                    if (vol === 0) return true;
+                    const volumeInCups = convertFromMl(vol, 'cups');
+                    // Check if multiplying by 4 results in a whole number (or very close to it)
+                    return Math.abs((volumeInCups * 4) - Math.round(volumeInCups * 4)) < 0.001;
+                });
+
+                if (isDivisibleByQuarterCup) {
+                    outputUnitSelector.value = 'cups';
+                } else {
+                    outputUnitSelector.value = 'oz';
+                }
+            };
+
+            // --- CSV EXPORT ---
+            const exportCSV = () => {
+                if (!lastCalculation) return;
+
+                const { ingredients, multiplier, stats } = lastCalculation;
+                const outputUnit = outputUnitSelector.value;
+                let csvContent = "data:text/csv;charset=utf-8,";
+
+                // Recipe
+                csvContent += "Ingredient,Volume\r\n";
+                ingredients.forEach(ing => {
+                    const batchVolumeMl = convertToMl(ing.qty, ing.unit) * multiplier;
+                    const displayVolume = convertFromMl(batchVolumeMl, outputUnit);
+                    const formattedVolume = outputUnit === 'cups' ? decimalToFraction(displayVolume) : displayVolume.toFixed(2);
+                    csvContent += `${ing.name.replace(/,/g, '')},"${formattedVolume} ${outputUnit}"\r\n`;
+                });
+                if (stats.waterToAddMl > 0) {
+                     const waterVolume = convertFromMl(stats.waterToAddMl * multiplier, outputUnit);
+                     const formattedWater = outputUnit === 'cups' ? decimalToFraction(waterVolume) : waterVolume.toFixed(2);
+                     csvContent += `Water (for dilution),"${formattedWater} ${outputUnit}"\r\n`;
+                }
+
+                // Stats
+                csvContent += "\r\nStatistic,Value\r\n";
+                csvContent += `Initial Volume,"${(convertFromMl(stats.initialVolumeMl, 'oz') * multiplier).toFixed(2)} oz"\r\n`;
+                csvContent += `Initial ABV,"${stats.initialABV.toFixed(2)} %"\r\n`;
+                csvContent += `Water to Add,"${(convertFromMl(stats.waterToAddMl, 'oz') * multiplier).toFixed(2)} oz"\r\n`;
+                csvContent += `Final Volume,"${(convertFromMl(stats.finalVolumeMl, 'oz') * multiplier).toFixed(2)} oz"\r\n`;
+                csvContent += `Final ABV,"${stats.finalABV.toFixed(2)} %"\r\n`;
+                csvContent += `Final Brix,"${(isNaN(stats.finalBrix) ? 'N/A' : stats.finalBrix.toFixed(2))} °"\r\n`;
+                csvContent += `Final TA,"${stats.finalTA.toFixed(2)} g/L"\r\n`;
+
+                const encodedUri = encodeURI(csvContent);
+                const link = document.createElement("a");
+                link.setAttribute("href", encodedUri);
+                link.setAttribute("download", "batch_boss_recipe.csv");
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            // --- GEMINI API ---
+            const handleGeminiSubmit = async () => {
+                const promptText = geminiPrompt.value.trim();
+                const apiKey = geminiApiKeyInput.value.trim();
+
+                if (!promptText) {
+                    showNotification("Please describe the recipe you want.");
+                    return;
+                }
+                if (!apiKey) {
+                    showNotification("Please enter your Gemini API Key.");
+                    return;
+                }
+
+                // Save API key for future use
+                localStorage.setItem('batchBossApiKey', apiKey);
+
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+                geminiLoader.classList.remove('hidden');
+                geminiSubmit.disabled = true;
+
+                const systemPrompt = `You are a world-class mixologist. Generate a creative and delicious cocktail recipe based on the user's request. Provide the recipe in a structured JSON format. The JSON object must have six keys: "cocktailName" (string), "method" (string: 'stirred' or 'shaken'), "glass" (string, e.g., "Coupe glass"), "garnish" (string, e.g., "Lime wheel"), "pourVolumeOz" (number, representing the final volume of a single prepared drink in ounces), and "ingredients" (an array of objects). Each ingredient object must have the following keys: "name" (string), "qty" (number), "unit" (string: 'oz', 'ml', 'dash', or 'drop'), "abv" (number, estimate if unknown), "brix" (number, estimate if unknown), and "ta" (number, estimate if unknown). Provide realistic estimates for ABV, Brix, and TA.`;
+
+                const payload = {
+                    contents: [{ parts: [{ text: promptText }] }],
+                    systemInstruction: { parts: [{ text: systemPrompt }] },
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: "OBJECT",
+                            properties: {
+                                "cocktailName": { "type": "STRING" }, "method": { "type": "STRING" },
+                                "glass": { "type": "STRING" }, "garnish": { "type": "STRING" },
+                                "pourVolumeOz": { "type": "NUMBER" },
+                                "ingredients": {
+                                    type: "ARRAY",
+                                    items: {
+                                        type: "OBJECT",
+                                        properties: {
+                                            "name": { "type": "STRING" }, "qty": { "type": "NUMBER" }, "unit": { "type": "STRING" },
+                                            "abv": { "type": "NUMBER" }, "brix": { "type": "NUMBER" }, "ta": { "type": "NUMBER" }
+                                        },
+                                        required: ["name", "qty", "unit", "abv", "brix", "ta"]
+                                    }
+                                }
+                            },
+                            required: ["cocktailName", "method", "glass", "garnish", "pourVolumeOz", "ingredients"]
+                        }
+                    }
+                };
+
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
+                    const result = await response.json();
+                    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (text) {
+                        const recipe = JSON.parse(text);
+                        ingredientsList.innerHTML = ''; // Clear existing ingredients
+                        recipeNameDisplay.textContent = recipe.cocktailName;
+                        recipe.ingredients.forEach(ing => addIngredientRow(ing));
+                        preparationMethodSelector.value = recipe.method || 'shaken';
+                        lastRecipeDetails = {
+                            name: recipe.cocktailName,
+                            glass: recipe.glass,
+                            garnish: recipe.garnish,
+                            pourVolumeOz: recipe.pourVolumeOz
+                        };
+                        cocktailSelector.value = ''; // Clear the classic cocktail dropdown
+                        geminiModal.classList.add('hidden');
+                        syncLinkedInputs(); // Sync the calculator with the new recipe
+                        saveState();
+                    } else {
+                        throw new Error('No content returned from API.');
+                    }
+                } catch (error) {
+                    console.error("Gemini API Error:", error);
+                    showNotification(`Error: ${error.message}. Please check your API Key.`);
+                } finally {
+                     geminiLoader.classList.add('hidden');
+                     geminiSubmit.disabled = false;
+                }
+            };
+
+            // --- REACTIVE LISTENERS (EVENT DELEGATION) ---
+            // This captures changes in any ingredient input or select box
+            ingredientsList.addEventListener('input', (e) => {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') {
+                    syncLinkedInputs();
+                    saveState();
+                }
+            });
+            ingredientsList.addEventListener('change', (e) => {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') {
+                    syncLinkedInputs();
+                    saveState();
+                }
+            });
+
+            // --- EVENT LISTENERS ---
+            addIngredientBtn.addEventListener('click', () => addIngredientRow());
+            cocktailSelector.addEventListener('change', (e) => populateIngredients(e.target.value));
+
+            batchModeRadios.forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    if (e.target.value === 'drinks') {
+                        drinkQuantityInput.disabled = false;
+                        drinkQuantityInput.placeholder = 'e.g., 10';
+                        totalVolumeInput.disabled = true;
+                        totalVolumeInput.placeholder = 'Calculated';
+                    } else {
+                        drinkQuantityInput.disabled = true;
+                        drinkQuantityInput.placeholder = 'Calculated';
+                        totalVolumeInput.disabled = false;
+                        totalVolumeInput.placeholder = 'e.g., 750';
+                    }
+                    syncLinkedInputs();
+                    saveState();
+                });
+            });
+
+            [drinkQuantityInput, totalVolumeInput, totalVolumeUnitSelector, preparationMethodSelector, onTheRocksCheckbox].forEach(el => {
+                el.addEventListener('input', () => { syncLinkedInputs(); saveState(); });
+                el.addEventListener('change', () => { syncLinkedInputs(); saveState(); });
+            });
+
+            calculateBtn.addEventListener('click', () => {
+                const calculationData = performCalculation();
+                if (!calculationData) return;
+
+                const mode = document.querySelector('input[name="batch-mode"]:checked').value;
+                let multiplier = 0;
+
+                if (mode === 'drinks') {
+                    const numDrinks = parseFloat(drinkQuantityInput.value);
+                    if (isNaN(numDrinks) || numDrinks <= 0) {
+                        showNotification("Please enter a valid number of drinks.");
+                        return;
+                    }
+                    multiplier = numDrinks;
+                } else { // By volume
+                    const totalVolume = parseFloat(totalVolumeInput.value);
+                     if (isNaN(totalVolume) || totalVolume <= 0) {
+                        showNotification("Please enter a valid total volume.");
+                        return;
+                    }
+                    const totalVolumeMl = convertToMl(totalVolume, totalVolumeUnitSelector.value);
+                    if (calculationData.stats.finalVolumeMl > 0) {
+                        multiplier = totalVolumeMl / calculationData.stats.finalVolumeMl;
+                    }
+                }
+
+                lastCalculation = { ...calculationData, multiplier };
+                determineOptimalOutputUnit(lastCalculation);
+                renderAll();
+            });
+
+            resetBtn.addEventListener('click', () => {
+                ingredientsList.innerHTML = '';
+                lastCalculation = null;
+                lastRecipeDetails = null;
+                recipeNameDisplay.textContent = '';
+                cocktailSelector.value = '';
+                drinkQuantityInput.value = '';
+                totalVolumeInput.value = '';
+                onTheRocksCheckbox.checked = false;
+                document.getElementById('batch-by-drinks').click();
+                resultsSection.classList.add('hidden');
+                statsSection.classList.add('hidden');
+                preparationSection.classList.add('hidden');
+                addIngredientRow();
+                saveState();
+            });
+
+            printBtn.addEventListener('click', () => window.print());
+            outputUnitSelector.addEventListener('change', renderAll);
+            exportCsvBtn.addEventListener('click', exportCSV);
+
+            suggestRecipeBtn.addEventListener('click', () => {
+                geminiModal.classList.remove('hidden');
+                const savedKey = localStorage.getItem('batchBossApiKey');
+                if(savedKey) geminiApiKeyInput.value = savedKey;
+            });
+            geminiCancel.addEventListener('click', () => geminiModal.classList.add('hidden'));
+            geminiSubmit.addEventListener('click', handleGeminiSubmit);
+
+            // --- INITIALIZATION ---
+            loadState();
+        });
+    </script>
+</body>
+</html>
